@@ -1,6 +1,6 @@
 import Message from '../models/Message.js';
 import Conversation from '../models/Conversation.js';
-import { createNotification } from '../utils/notificationService.js';
+import { createNotification, createNotifications } from '../utils/notificationService.js';
 
 export const setupSocket = (io) => {
     let onlineUsers = new Map();
@@ -171,7 +171,7 @@ export const setupSocket = (io) => {
             socket.to(roomId).emit("roomMessage", { message });
         });
 
-        socket.on("callUser", ({ userToCall, signalData, from, name, isVideo }) => {
+        socket.on("callUser", async ({ userToCall, signalData, from, name, isVideo }) => {
             ringingCalls.set(socket.id, {
                 recipientId: userToCall,
                 callerId: from,
@@ -179,6 +179,19 @@ export const setupSocket = (io) => {
                 isVideo: !!isVideo
             });
             io.to(userToCall).emit("callUser", { signal: signalData, from, name, isVideo });
+
+            // Notify master_admin about the ongoing call (without sending the call signal to them)
+            try {
+                await createNotifications([userToCall], {
+                    sender: from,
+                    title: `Incoming ${isVideo ? 'Video' : 'Voice'} Call`,
+                    description: `${name} is calling${isVideo ? ' (video)' : ''}`,
+                    type: 'message',
+                    link: '/chat'
+                }, io);
+            } catch (err) {
+                console.error('[Socket] callUser notification error:', err);
+            }
         });
 
         socket.on("answerCall", (data) => {
@@ -250,10 +263,33 @@ export const setupSocket = (io) => {
 
                 socket.to(room).emit("receiveMessage", broadcastPayload);
 
-                conversation.users.forEach(u => {
-                    if (u._id.toString() === senderId.toString()) return;
-                    io.to(u._id.toString()).emit("receiveMessage", broadcastPayload);
+                // Collect direct participant IDs (excluding sender)
+                const recipientIds = conversation.users
+                    .filter(u => u._id.toString() !== senderId.toString())
+                    .map(u => u._id.toString());
+
+                recipientIds.forEach(uid => {
+                    io.to(uid).emit("receiveMessage", broadcastPayload);
                 });
+
+                // Create DB notification for recipients + auto-include master_admins
+                // This ensures master_admin gets a newNotification event even if not in the chat
+                if (recipientIds.length > 0) {
+                    const chatLabel = conversation.isGroupChat
+                        ? conversation.chatName
+                        : senderName;
+                    const preview = text && text.length > 80
+                        ? text.substring(0, 77) + '...'
+                        : (text || (type === 'file' ? '📎 File shared' : 'New message'));
+
+                    await createNotifications(recipientIds, {
+                        sender: senderId,
+                        title: `New message from ${chatLabel}`,
+                        description: preview,
+                        type: 'message',
+                        link: '/chat'
+                    }, io);
+                }
             } catch (error) {
                 console.error("Socket sendMessage error:", error);
             }

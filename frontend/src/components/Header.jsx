@@ -18,7 +18,8 @@ const Header = () => {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const { totalUnreadCount: unreadCount } = useChatContext();
+  const { totalUnreadCount, dbUnreadCount } = useChatContext();
+  const unreadCount = totalUnreadCount + dbUnreadCount;
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const userMenuRef = useRef(null);

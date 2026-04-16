@@ -2,7 +2,6 @@ import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useChatContext } from '../../context/ChatContext';
 import { MessageCircle, FileText, UserPlus, Calendar, CheckSquare, Clock, AlertCircle, Bell } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { toast } from 'sonner';
 
 const typeIcons = {
     'task_assigned': CheckSquare,
@@ -46,7 +45,7 @@ export const useNotifications = () => {
     const [pages, setPages] = useState(1);
     const [total, setTotal] = useState(0);
 
-    const { chatsData, setChatsData, setActiveChat, socketRef, socketConnected, user } = useChatContext();
+    const { chatsData, setChatsData, setActiveChat, socketRef, socketConnected, user, setDbUnreadCount } = useChatContext();
     const navigate = useNavigate();
 
     const token = user?.token || (() => {
@@ -89,7 +88,9 @@ export const useNotifications = () => {
 
     useEffect(() => {
         fetchNotifications(filter);
-    }, [filter, fetchNotifications]);
+        // Reset the global badge counter whenever user opens the notifications page
+        setDbUnreadCount(0);
+    }, [filter, fetchNotifications, setDbUnreadCount]);
 
     useEffect(() => {
         const socket = socketRef.current;
@@ -104,10 +105,8 @@ export const useNotifications = () => {
                 time: 'Just now'
             };
             setDbNotifications(prev => [formatted, ...prev]);
-            toast(notification.title, {
-                description: notification.description,
-                duration: 5000,
-            });
+            // Note: toast is intentionally NOT called here.
+            // ChatContext.jsx handles the global toast + badge on every page.
         };
 
         const handleStatusSync = ({ id, allRead, read }) => {
@@ -189,6 +188,7 @@ export const useNotifications = () => {
             });
             if (res.ok) {
                 setDbNotifications(prev => prev.map(n => ({ ...n, read: true })));
+                setDbUnreadCount(0);
                 setChatsData(prev => {
                     const updated = {};
                     for (const [key, chat] of Object.entries(prev)) {
@@ -200,7 +200,7 @@ export const useNotifications = () => {
         } catch (err) {
             console.error('Failed to mark all as read', err);
         }
-    }, [setChatsData]);
+    }, [setChatsData, setDbUnreadCount]);
 
     const deleteNotification = useCallback(async (id) => {
         if (typeof id === 'string' && id.startsWith('chat-')) return;

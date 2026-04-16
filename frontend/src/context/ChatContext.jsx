@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useRef, useCallb
 import { useAuth } from './AuthContext';
 import io from 'socket.io-client';
 import { logger } from '../utils/logger';
+import { toast } from 'sonner';
 
 const ringtoneSound = '/sounds/ringtone.mp3';
 
@@ -24,6 +25,7 @@ export const ChatProvider = ({ children }) => {
     const sentMessageIdsRef = useRef(new Set());
     const processedMessageIdsRef = useRef(new Set());
     const [onlineUsers, setOnlineUsers] = useState(new Set());
+    const [dbUnreadCount, setDbUnreadCount] = useState(0);
 
     const ringtoneRef = useRef(null);
 
@@ -260,6 +262,16 @@ export const ChatProvider = ({ children }) => {
             });
         });
 
+        // Global listener: incoming DB notifications for ANY page
+        // Keeps master admin bell badge live without needing /notifications page open
+        socketRef.current.on('newNotification', (notification) => {
+            setDbUnreadCount(prev => prev + 1);
+            toast(notification.title, {
+                description: notification.description,
+                duration: 5000,
+            });
+        });
+
         return () => {
             socketRef.current?.disconnect();
         };
@@ -311,6 +323,8 @@ export const ChatProvider = ({ children }) => {
         chatsData,
         setChatsData,
         totalUnreadCount,
+        dbUnreadCount,
+        setDbUnreadCount,
         socketRef,
         socketConnected,
         isLoadingHistory,
