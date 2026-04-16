@@ -6,59 +6,54 @@ import { createNotifications, emitTeamUpdate } from '../utils/notificationServic
 import { upload, cloudinary, CLOUDINARY_ENABLED } from '../config/cloudinary.js';
 import path from 'path';
 import fs from 'fs';
-import https from 'https';
-import http from 'http';
 
 // ---------- helpers ----------
 
 /**
+ * Extract Cloudinary public_id from a full CDN URL.
+ * e.g. https://res.cloudinary.com/{cloud}/raw/upload/v123/aurora-docs/1234-resume
+ *   → "aurora-docs/1234-resume"
+ */
+const extractCloudinaryPublicId = (url) => {
+    try {
+        const match = url.match(/\/upload\/(?:v\d+\/)?(.+)$/);
+        if (match) return match[1].replace(/\.[^/.]+$/, '');
+    } catch (_) {}
+    return null;
+};
+
+/**
  * Delete a file from whichever storage it lives in.
- * doc.cloudinaryId → Cloudinary
- * doc.url starts with /uploads/ → local disk
+ *   doc.cloudinaryId  → use stored public_id (preferred)
+ *   doc.url = http(s) → extract public_id from URL (fallback for older records)
+ *   doc.url = /uploads/... → delete from local disk
  */
 const deleteStoredFile = async (doc) => {
-    if (doc.cloudinaryId && CLOUDINARY_ENABLED) {
-        try {
-            await cloudinary.uploader.destroy(doc.cloudinaryId, { resource_type: 'auto' });
-        } catch (err) {
-            console.error('[Cloudinary] delete error:', err.message);
+    const isCloudinaryUrl = doc.url && doc.url.startsWith('http');
+
+    if (isCloudinaryUrl && CLOUDINARY_ENABLED) {
+        const publicId = doc.cloudinaryId || extractCloudinaryPublicId(doc.url);
+        if (publicId) {
+            try {
+                const result = await cloudinary.uploader.destroy(publicId, { resource_type: 'auto' });
+                console.log(`[Cloudinary] deleted public_id="${publicId}" result=${result.result}`);
+            } catch (err) {
+                console.error('[Cloudinary] delete error:', err.message);
+            }
+        } else {
+            console.warn('[Cloudinary] could not determine public_id for URL:', doc.url);
         }
-    } else if (doc.url && doc.url.startsWith('/uploads/')) {
+    } else if (!isCloudinaryUrl && doc.url && doc.url.startsWith('/uploads/')) {
         try {
             const filePath = path.join(path.resolve(), doc.url.replace(/^\//, ''));
-            if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+            if (fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath);
+                console.log(`[Local] deleted: ${filePath}`);
+            }
         } catch (err) {
             console.error('[Local] delete error:', err.message);
         }
     }
-};
-
-/**
- * Pipe a remote HTTPS/HTTP URL to the Express response.
- * Used to proxy Cloudinary files back to the client so that
- * auth is enforced on our side and fetch() gets a normal streamable response.
- */
-const proxyRemoteFile = (remoteUrl, res, filename) => {
-    return new Promise((resolve, reject) => {
-        const proto = remoteUrl.startsWith('https') ? https : http;
-        proto.get(remoteUrl, (remoteRes) => {
-            if (remoteRes.statusCode !== 200) {
-                reject(new Error(`Remote file returned ${remoteRes.statusCode}`));
-                return;
-            }
-            const contentType = remoteRes.headers['content-type'] || 'application/octet-stream';
-            const encodedName = encodeURIComponent(filename);
-            res.setHeader('Content-Type', contentType);
-            res.setHeader('Content-Disposition', `attachment; filename="${filename}"; filename*=UTF-8''${encodedName}`);
-            res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
-            if (remoteRes.headers['content-length']) {
-                res.setHeader('Content-Length', remoteRes.headers['content-length']);
-            }
-            remoteRes.pipe(res);
-            remoteRes.on('end', resolve);
-            remoteRes.on('error', reject);
-        }).on('error', reject);
-    });
 };
 
 // ---------- Controllers ----------
@@ -144,17 +139,15 @@ const uploadDocument = asyncHandler(async (req, res) => {
         throw new Error('Not authorized to upload to this team');
     }
 
-    // Determine stored URL:
-    //   Cloudinary mode → req.file.path is the https://res.cloudinary.com/... CDN URL
-    //   Local mode      → req.file.path is the absolute disk path; build relative URL
+    // Cloudinary mode → req.file.path = https CDN URL, req.file.filename = public_id
+    // Local mode      → req.file.path = absolute disk path, build relative URL
     let storedUrl;
     let cloudinaryId = null;
 
     if (CLOUDINARY_ENABLED && req.file.path && req.file.path.startsWith('http')) {
-        storedUrl = req.file.path;          // Cloudinary CDN URL
-        cloudinaryId = req.file.filename;   // Cloudinary public_id
+        storedUrl    = req.file.path;
+        cloudinaryId = req.file.filename;
     } else {
-        // Local disk — build a relative URL the static server can serve
         storedUrl = `/uploads/${req.file.filename}`;
     }
 
@@ -297,9 +290,13 @@ const deleteFolder = asyncHandler(async (req, res) => {
     res.json({ message: 'Folder deleted' });
 });
 
-// @desc    Download document — auth-gated, streams file to client
+// @desc    Download document (auth-gated)
 // @route   GET /api/documents/download/:id
 // @access  Private
+//
+// For Cloudinary files: verify auth, return JSON { downloadUrl } with fl_attachment.
+//   The browser fetches directly from CDN — no server-side proxy needed.
+// For local files: stream from disk with Content-Disposition: attachment.
 const downloadDocument = asyncHandler(async (req, res) => {
     const document = await Document.findById(req.params.id);
     if (!document) {
@@ -313,10 +310,10 @@ const downloadDocument = asyncHandler(async (req, res) => {
         throw new Error('Team not found');
     }
 
-    const userId = req.user.id.toString();
+    const userId      = req.user.id.toString();
     const isMasterAdmin = req.user.role === 'master_admin';
-    const isHead = isMasterAdmin || req.user.role === 'team_head';
-    const isMember = isMasterAdmin
+    const isHead      = isMasterAdmin || req.user.role === 'team_head';
+    const isMember    = isMasterAdmin
         || team.members.some(m => m && m.toString() === userId)
         || team.owner.toString() === userId;
 
@@ -330,39 +327,60 @@ const downloadDocument = asyncHandler(async (req, res) => {
         throw new Error('Downloads have been restricted for this file by the team head');
     }
 
-    const fileName = document.name;
+    const fileName  = document.name;
+    const storedUrl = document.url || '';
 
-    // ── CASE 1: Cloudinary-hosted (URL starts with http) ────────────────────
-    if (document.url && document.url.startsWith('http')) {
-        // Proxy the file through our server so the client just gets a plain stream.
-        // This avoids the opaque-response problem that breaks fetch() blob downloads.
-        try {
-            await proxyRemoteFile(document.url, res, fileName);
-        } catch (err) {
-            console.error('[Download] Cloudinary proxy error:', err.message);
-            if (!res.headersSent) {
-                res.status(502);
-                res.json({ message: 'Could not retrieve file from cloud storage' });
+    console.log(`[Download] doc=${document._id}  url=${storedUrl}`);
+
+    // ── CASE 1: Absolute URL (Cloudinary CDN) ────────────────────────────────
+    if (storedUrl.startsWith('http')) {
+        const isLocalhost = /https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/.test(storedUrl);
+
+        if (isLocalhost) {
+            // Localhost URL stored by mistake — strip host, serve from disk
+            const urlPath  = storedUrl.replace(/^https?:\/\/[^/]+/, '');
+            const diskPath = path.join(path.resolve(), urlPath.replace(/^\//, ''));
+            if (fs.existsSync(diskPath)) {
+                const enc = encodeURIComponent(fileName);
+                res.setHeader('Content-Disposition', `attachment; filename="${fileName}"; filename*=UTF-8''${enc}`);
+                res.setHeader('Content-Type', 'application/octet-stream');
+                res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+                fs.createReadStream(diskPath).pipe(res);
+                // Self-heal DB record
+                Document.findByIdAndUpdate(document._id, { url: urlPath, cloudinaryId: null }).catch(() => {});
+            } else {
+                res.status(404).json({ message: 'File not found on disk. Please re-upload.' });
             }
+            return;
         }
-        return;
+
+        // Real Cloudinary URL.
+        // Add fl_attachment so the browser forces a download (not inline preview).
+        // Return as JSON — frontend uses a plain anchor click to trigger the download.
+        // This is far more reliable than piping through our server.
+        let downloadUrl = storedUrl;
+        if (storedUrl.includes('/upload/') && !storedUrl.includes('fl_attachment')) {
+            downloadUrl = storedUrl.replace('/upload/', '/upload/fl_attachment/');
+        }
+        return res.json({ downloadUrl, fileName });
     }
 
-    // ── CASE 2: Local disk ───────────────────────────────────────────────────
-    const filePath = path.join(path.resolve(), document.url.replace(/^\//, ''));
+    // ── CASE 2: Local disk (/uploads/...) ────────────────────────────────────
+    const filePath = path.join(path.resolve(), storedUrl.replace(/^\//, ''));
     if (!fs.existsSync(filePath)) {
-        res.status(404);
-        throw new Error('File not found on server — it may have been lost after a server restart');
+        return res.status(404).json({
+            message: 'File not found on server. It may have been lost after a restart. Please re-upload.',
+        });
     }
 
-    const encodedName = encodeURIComponent(fileName);
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"; filename*=UTF-8''${encodedName}`);
+    const enc = encodeURIComponent(fileName);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"; filename*=UTF-8''${enc}`);
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
 
     const fileStream = fs.createReadStream(filePath);
-    fileStream.on('error', (err) => {
-        console.error('[Download] Read stream error:', err.message);
+    fileStream.on('error', (e) => {
+        console.error('[Download] stream error:', e.message);
         if (!res.headersSent) res.status(500).json({ message: 'Error reading file' });
     });
     fileStream.pipe(res);
@@ -378,9 +396,9 @@ const deleteDocument = asyncHandler(async (req, res) => {
         throw new Error('Document not found');
     }
 
-    const isUploader = document.uploadedBy.toString() === req.user.id.toString();
+    const isUploader  = document.uploadedBy.toString() === req.user.id.toString();
     const isMasterAdmin = req.user.role === 'master_admin';
-    const isHead = isMasterAdmin || req.user.role === 'team_head' || req.user.role === 'admin';
+    const isHead      = isMasterAdmin || req.user.role === 'team_head' || req.user.role === 'admin';
 
     if (!isUploader && !isHead) {
         res.status(403);
@@ -392,7 +410,7 @@ const deleteDocument = asyncHandler(async (req, res) => {
     await document.deleteOne();
 
     const team = await Team.findById(teamId);
-    const io = req.app.get('socketio');
+    const io   = req.app.get('socketio');
     if (team) {
         const recipientIds = [...team.members, team.owner]
             .filter(id => id != null)
@@ -425,8 +443,8 @@ const toggleDownloadable = asyncHandler(async (req, res) => {
     }
 
     const isMasterAdmin = req.user.role === 'master_admin';
-    const isHead = isMasterAdmin || req.user.role === 'team_head';
-    const isUploader = document.uploadedBy.toString() === req.user.id.toString();
+    const isHead        = isMasterAdmin || req.user.role === 'team_head';
+    const isUploader    = document.uploadedBy.toString() === req.user.id.toString();
 
     if (!isHead && !isUploader) {
         res.status(403);

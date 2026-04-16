@@ -170,36 +170,58 @@ export const useDocumentShare = () => {
         }
     }
 
-    const handleDownload = (doc) => {
+    const handleDownload = async (doc) => {
         const token = user?.token;
-        if (!token) {
-            toast.error('Not authenticated');
-            return;
-        }
-        fetch(`/api/documents/download/${doc._id}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
-        })
-            .then(async (res) => {
-                if (!res.ok) {
+        if (!token) { toast.error('Not authenticated'); return; }
+
+        try {
+            const res = await fetch(`/api/documents/download/${doc._id}`, {
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+
+            if (!res.ok) {
+                const contentType = res.headers.get('content-type') || '';
+                if (contentType.includes('application/json')) {
                     const err = await res.json().catch(() => ({}));
                     toast.error(err.message || 'Download failed');
-                    return;
+                } else {
+                    toast.error(`Download failed (${res.status})`);
                 }
-                const blob = await res.blob();
-                const url = window.URL.createObjectURL(blob);
+                return;
+            }
+
+            const contentType = res.headers.get('content-type') || '';
+
+            if (contentType.includes('application/json')) {
+                // Cloudinary file — backend returned { downloadUrl, fileName }
+                // Use a plain anchor click so the browser handles the CDN download natively.
+                const { downloadUrl, fileName } = await res.json();
                 const a = document.createElement('a');
-                a.href = url;
+                a.href = downloadUrl;
+                a.download = fileName || doc.name;
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                toast.success('Download started');
+            } else {
+                // Local disk file — backend streamed binary with Content-Disposition
+                const blob = await res.blob();
+                const url  = window.URL.createObjectURL(blob);
+                const a    = document.createElement('a');
+                a.href     = url;
                 a.download = doc.name;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
                 window.URL.revokeObjectURL(url);
                 toast.success('Download started');
-            })
-            .catch((err) => {
-                console.error('Download error:', err);
-                toast.error('Failed to download file');
-            });
+            }
+        } catch (err) {
+            console.error('Download error:', err);
+            toast.error('Network error — could not complete download');
+        }
     };
 
     const handleShare = (doc) => {
