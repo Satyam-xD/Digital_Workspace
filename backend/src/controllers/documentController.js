@@ -369,29 +369,32 @@ const downloadDocument = asyncHandler(async (req, res) => {
         }
 
         // Real Cloudinary URL.
-        // Build the download URL via the Cloudinary SDK so the resource_type is always
-        // correct (image/video/raw). Accessing a raw PDF via /image/upload/ gives 401.
-        const publicId = document.cloudinaryId || extractCloudinaryPublicId(storedUrl);
+        //
+        // Strategy: manipulate the STORED URL (which has the correct version from
+        // Cloudinary's upload API) rather than calling cloudinary.url() which
+        // derives version as 'v1' when unknown, causing 404.
+        //
+        // Steps:
+        //   1. Fix the resource_type segment (/image/ → /raw/ for PDFs, etc.)
+        //   2. Inject fl_attachment after /upload/ so browser forces a download
+        //
+        // Before: https://res.cloudinary.com/{c}/image/upload/v{ver}/aurora-docs/xyz
+        // After:  https://res.cloudinary.com/{c}/raw/upload/fl_attachment/v{ver}/aurora-docs/xyz
+
         const resourceType = getCloudinaryResourceType(fileName);
 
-        let downloadUrl;
-        if (publicId && CLOUDINARY_ENABLED) {
-            // SDK-generated URL — guaranteed correct resource_type + fl_attachment
-            downloadUrl = cloudinary.url(publicId, {
-                resource_type: resourceType,
-                secure: true,
-                flags: 'attachment',
-            });
-            console.log(`[Download] SDK URL (${resourceType}): ${downloadUrl}`);
-        } else {
-            // Fallback: patch the stored URL resource type from the extension
-            const correctType = resourceType; // 'image' | 'video' | 'raw'
-            downloadUrl = storedUrl
-                .replace(/\/(image|video|raw)\/upload\//, `/${correctType}/upload/`)
-                .replace('/upload/', '/upload/fl_attachment/');
-            console.log(`[Download] Patched URL: ${downloadUrl}`);
+        // Step 1 — fix resource_type (image|video|raw → correct type)
+        let downloadUrl = storedUrl.replace(
+            /\/(image|video|raw)(\/upload\/)/,
+            `/${resourceType}$2`
+        );
+
+        // Step 2 — inject fl_attachment (only if not already present)
+        if (!downloadUrl.includes('fl_attachment')) {
+            downloadUrl = downloadUrl.replace('/upload/', '/upload/fl_attachment/');
         }
 
+        console.log(`[Download] resourceType=${resourceType}  url=${downloadUrl}`);
         return res.json({ downloadUrl, fileName });
     }
 
