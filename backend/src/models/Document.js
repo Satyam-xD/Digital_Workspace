@@ -37,6 +37,10 @@ const documentSchema = mongoose.Schema({
         ref: 'Team',
         required: true
     },
+    isDownloadable: {
+        type: Boolean,
+        default: true   // All roles can download by default; head/admin can restrict
+    },
 }, {
     timestamps: true,
 });

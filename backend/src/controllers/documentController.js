@@ -303,11 +303,18 @@ const downloadDocument = asyncHandler(async (req, res) => {
 
     const userId = req.user.id.toString();
     const isMasterAdmin = req.user.role === 'master_admin';
+    const isHead = isMasterAdmin || req.user.role === 'team_head';
     const isMember = isMasterAdmin || team.members.some(m => m && m.toString() === userId) || team.owner.toString() === userId;
     
     if (!isMember) {
         res.status(403);
         throw new Error('Not authorized to download this file');
+    }
+
+    // Enforce the per-document downloadable flag for regular members
+    if (!document.isDownloadable && !isHead) {
+        res.status(403);
+        throw new Error('Downloads have been restricted for this file by the team head');
     }
 
     // Resolve the file path on disk
@@ -386,4 +393,33 @@ const deleteDocument = asyncHandler(async (req, res) => {
     res.json({ id: req.params.id });
 });
 
-export { getDocuments, uploadDocument, downloadDocument, deleteDocument, createFolder, renameFolder, deleteFolder };
+// @desc    Toggle isDownloadable flag for a document
+// @route   PATCH /api/documents/:id/downloadable
+// @access  Private (Uploader, Team Head, Master Admin)
+const toggleDownloadable = asyncHandler(async (req, res) => {
+    const document = await Document.findById(req.params.id);
+
+    if (!document) {
+        res.status(404);
+        throw new Error('Document not found');
+    }
+
+    const isMasterAdmin = req.user.role === 'master_admin';
+    const isHead = isMasterAdmin || req.user.role === 'team_head';
+    const isUploader = document.uploadedBy.toString() === req.user.id.toString();
+
+    if (!isHead && !isUploader) {
+        res.status(403);
+        throw new Error('Only Team Heads, Master Admins, or the uploader can change download permissions');
+    }
+
+    document.isDownloadable = !document.isDownloadable;
+    await document.save();
+
+    const io = req.app.get('socketio');
+    emitTeamUpdate(io, document.team, 'DOCUMENT_UPDATE');
+
+    res.json({ _id: document._id, isDownloadable: document.isDownloadable });
+});
+
+export { getDocuments, uploadDocument, downloadDocument, deleteDocument, createFolder, renameFolder, deleteFolder, toggleDownloadable };

@@ -1,5 +1,5 @@
 import express from 'express';
-import { getDocuments, uploadDocument, downloadDocument, deleteDocument, createFolder, renameFolder, deleteFolder } from '../controllers/documentController.js';
+import { getDocuments, uploadDocument, downloadDocument, deleteDocument, createFolder, renameFolder, deleteFolder, toggleDownloadable } from '../controllers/documentController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
@@ -19,5 +19,7 @@ router.route('/folder/:id')
 
 router.route('/:id')
     .delete(deleteDocument);
+
+router.patch('/:id/downloadable', toggleDownloadable);
 
 export default router;

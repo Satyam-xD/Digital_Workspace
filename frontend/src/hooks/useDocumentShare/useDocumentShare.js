@@ -228,6 +228,31 @@ export const useDocumentShare = () => {
         }
     };
 
+    const toggleDownloadable = async (doc) => {
+        try {
+            const response = await fetch(`/api/documents/${doc._id}/downloadable`, {
+                method: 'PATCH',
+                headers: { 'Authorization': `Bearer ${user.token}` }
+            });
+            if (response.ok) {
+                const updated = await response.json();
+                setDocuments(prev =>
+                    prev.map(d => d._id === doc._id
+                        ? { ...d, isDownloadable: updated.isDownloadable }
+                        : d
+                    )
+                );
+                toast.success(`Download ${updated.isDownloadable ? 'enabled' : 'restricted'} for "${doc.name}"`);
+            } else {
+                const err = await response.json();
+                toast.error(err.message || 'Failed to update download permission');
+            }
+        } catch (error) {
+            console.error('toggleDownloadable error:', error);
+            toast.error('Failed to update download permission');
+        }
+    };
+
     const getFileIcon = (type) => {
         if (!type) return { icon: FileText, color: 'text-gray-500 bg-gray-100 dark:bg-gray-700/50' };
         switch (type.toLowerCase()) {
@@ -268,6 +293,7 @@ export const useDocumentShare = () => {
         handleDelete,
         handleDownload,
         handleShare,
+        toggleDownloadable,
         getFileIcon,
         filteredDocs,
         filteredFolders

@@ -4,6 +4,7 @@ import DocumentTable from '../components/DocumentShare/DocumentTable';
 import CreateFolderModal from '../components/DocumentShare/CreateFolderModal';
 import { Upload, Search, Folder, Clock, Plus, Trash2, ChevronLeft } from 'lucide-react';
 import { useChatContext } from '../context/ChatContext';
+import { useAuth } from '../context/AuthContext';
 import { useEffect } from 'react';
 
 const DocumentShare = () => {
@@ -29,8 +30,11 @@ const DocumentShare = () => {
     getFileIcon,
     fetchDocuments,
     filteredDocs,
-    filteredFolders
+    filteredFolders,
+    toggleDownloadable
   } = useDocumentShare();
+
+  const { user } = useAuth();
 
   const { socketRef, socketConnected } = useChatContext();
   const [isCreateFolderOpen, setIsCreateFolderOpen] = React.useState(false);
@@ -188,6 +192,8 @@ const DocumentShare = () => {
               handleDownload={handleDownload}
               handleShare={handleShare}
               getFileIcon={getFileIcon}
+              toggleDownloadable={toggleDownloadable}
+              userRole={user?.role}
             />
 
           </div>
