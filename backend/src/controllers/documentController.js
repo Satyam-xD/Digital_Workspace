@@ -23,6 +23,19 @@ const extractCloudinaryPublicId = (url) => {
 };
 
 /**
+ * Map a file extension to the Cloudinary resource_type needed for URL delivery.
+ * PDFs and office docs must use 'raw' — accessing them via 'image' returns 401.
+ */
+const IMAGE_EXTS = ['jpg','jpeg','png','gif','webp','svg','bmp','ico','tiff','avif'];
+const VIDEO_EXTS = ['mp4','avi','mov','webm','mkv','flv','wmv','m4v'];
+const getCloudinaryResourceType = (filename) => {
+    const ext = (filename || '').split('.').pop().toLowerCase();
+    if (IMAGE_EXTS.includes(ext)) return 'image';
+    if (VIDEO_EXTS.includes(ext)) return 'video';
+    return 'raw';  // PDF, DOCX, XLSX, ZIP, etc.
+};
+
+/**
  * Delete a file from whichever storage it lives in.
  *   doc.cloudinaryId  → use stored public_id (preferred)
  *   doc.url = http(s) → extract public_id from URL (fallback for older records)
@@ -32,11 +45,12 @@ const deleteStoredFile = async (doc) => {
     const isCloudinaryUrl = doc.url && doc.url.startsWith('http');
 
     if (isCloudinaryUrl && CLOUDINARY_ENABLED) {
-        const publicId = doc.cloudinaryId || extractCloudinaryPublicId(doc.url);
+        const publicId     = doc.cloudinaryId || extractCloudinaryPublicId(doc.url);
+        const resourceType = getCloudinaryResourceType(doc.name || doc.url || '');
         if (publicId) {
             try {
-                const result = await cloudinary.uploader.destroy(publicId, { resource_type: 'auto' });
-                console.log(`[Cloudinary] deleted public_id="${publicId}" result=${result.result}`);
+                const result = await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
+                console.log(`[Cloudinary] deleted public_id="${publicId}" type=${resourceType} result=${result.result}`);
             } catch (err) {
                 console.error('[Cloudinary] delete error:', err.message);
             }
@@ -355,13 +369,29 @@ const downloadDocument = asyncHandler(async (req, res) => {
         }
 
         // Real Cloudinary URL.
-        // Add fl_attachment so the browser forces a download (not inline preview).
-        // Return as JSON — frontend uses a plain anchor click to trigger the download.
-        // This is far more reliable than piping through our server.
-        let downloadUrl = storedUrl;
-        if (storedUrl.includes('/upload/') && !storedUrl.includes('fl_attachment')) {
-            downloadUrl = storedUrl.replace('/upload/', '/upload/fl_attachment/');
+        // Build the download URL via the Cloudinary SDK so the resource_type is always
+        // correct (image/video/raw). Accessing a raw PDF via /image/upload/ gives 401.
+        const publicId = document.cloudinaryId || extractCloudinaryPublicId(storedUrl);
+        const resourceType = getCloudinaryResourceType(fileName);
+
+        let downloadUrl;
+        if (publicId && CLOUDINARY_ENABLED) {
+            // SDK-generated URL — guaranteed correct resource_type + fl_attachment
+            downloadUrl = cloudinary.url(publicId, {
+                resource_type: resourceType,
+                secure: true,
+                flags: 'attachment',
+            });
+            console.log(`[Download] SDK URL (${resourceType}): ${downloadUrl}`);
+        } else {
+            // Fallback: patch the stored URL resource type from the extension
+            const correctType = resourceType; // 'image' | 'video' | 'raw'
+            downloadUrl = storedUrl
+                .replace(/\/(image|video|raw)\/upload\//, `/${correctType}/upload/`)
+                .replace('/upload/', '/upload/fl_attachment/');
+            console.log(`[Download] Patched URL: ${downloadUrl}`);
         }
+
         return res.json({ downloadUrl, fileName });
     }
 
