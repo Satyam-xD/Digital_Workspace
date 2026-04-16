@@ -170,38 +170,43 @@ export const useDocumentShare = () => {
         }
     }
 
-    const handleDownload = async (doc) => {
-        try {
-            const response = await fetch(`/api/documents/download/${doc._id}`, {
-                headers: {
-                    'Authorization': `Bearer ${user.token}`,
-                },
-            });
-
-            if (!response.ok) {
-                toast.error('Failed to download file');
-                return;
-            }
-
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = doc.name;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
-            toast.success('Download started');
-        } catch (error) {
-            console.error('Download error:', error);
-            toast.error('Failed to download file');
+    const handleDownload = (doc) => {
+        const token = user?.token;
+        if (!token) {
+            toast.error('Not authenticated');
+            return;
         }
+        fetch(`/api/documents/download/${doc._id}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        })
+            .then(async (res) => {
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    toast.error(err.message || 'Download failed');
+                    return;
+                }
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = doc.name;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                toast.success('Download started');
+            })
+            .catch((err) => {
+                console.error('Download error:', err);
+                toast.error('Failed to download file');
+            });
     };
 
     const handleShare = (doc) => {
-        // Since URL is relative, construct full URL
-        const link = `${window.location.origin}${doc.url}`;
+        // doc.url is either an absolute Cloudinary URL or a relative /uploads/... path
+        const link = doc.url && doc.url.startsWith('http')
+            ? doc.url
+            : `${window.location.origin}${doc.url}`;
         navigator.clipboard.writeText(link);
         toast.success('Link copied to clipboard');
     };

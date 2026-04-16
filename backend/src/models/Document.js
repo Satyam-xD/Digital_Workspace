@@ -41,6 +41,10 @@ const documentSchema = mongoose.Schema({
         type: Boolean,
         default: true   // All roles can download by default; head/admin can restrict
     },
+    cloudinaryId: {
+        type: String,
+        default: null   // Cloudinary public_id; null for legacy local files
+    },
 }, {
     timestamps: true,
 });
