@@ -2,6 +2,11 @@ import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Shield, CheckCircle } from 'lucide-react';
 
+const ROLE_LABELS = {
+    team_head: 'Team Head',
+    admin: 'Admin',
+};
+
 const PendingApprovalsTab = ({ pendingUsers, loadingPending, mutations }) => {
     const handleApprove = (id, name) => {
         if (window.confirm(`Approve registration for ${name}?`)) {
@@ -64,7 +69,7 @@ const PendingApprovalsTab = ({ pendingUsers, loadingPending, mutations }) => {
                                     <p className="text-sm text-gray-500 mb-1">{u.email}</p>
                                     <div className="flex items-center gap-2">
                                         <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-400 inline-block">
-                                            Requested Role: Team Head
+                                            Requested Role: {ROLE_LABELS[u.role] ?? u.role}
                                         </span>
                                         <span className="text-xs text-gray-400">
                                             {new Date(u.createdAt).toLocaleDateString()}
@@ -79,7 +84,7 @@ const PendingApprovalsTab = ({ pendingUsers, loadingPending, mutations }) => {
                                     disabled={mutations.rejectUser.isLoading}
                                     className="flex-1 sm:flex-none px-4 py-2 border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl text-sm font-bold transition-colors shadow-sm disabled:opacity-50"
                                 >
-                                    Reject & Delete
+                                    Reject &amp; Delete
                                 </button>
                                 <button
                                     onClick={() => handleApprove(u._id, u.name)}
@@ -98,3 +103,4 @@ const PendingApprovalsTab = ({ pendingUsers, loadingPending, mutations }) => {
 };
 
 export default PendingApprovalsTab;
+

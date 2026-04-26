@@ -9,6 +9,8 @@ const protect = asyncHandler(async (req, res, next) => {
         req.headers.authorization &&
         req.headers.authorization.startsWith('Bearer')
     ) {
+        // ── 1. Verify the JWT (only JWT errors are caught here) ──────────────
+        let decoded;
         try {
             token = req.headers.authorization.split(' ')[1];
 
@@ -18,31 +20,33 @@ const protect = asyncHandler(async (req, res, next) => {
                 throw new Error('Server configuration error');
             }
 
-            const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-            req.user = await User.findById(decoded.id).select('-password');
-
-            if (!req.user) {
-                res.status(401);
-                throw new Error('User not found');
-            }
-
-            if (req.user.status === 'suspended') {
-                res.status(401);
-                throw new Error('Not authorized, account has been suspended by the master admin');
-            }
-
-            if (req.user.status === 'pending') {
-                res.status(403);
-                throw new Error('Not authorized, account is pending approval');
-            }
-
-            return next();
+            decoded = jwt.verify(token, process.env.JWT_SECRET);
         } catch (error) {
-            console.error('Auth Error:', error.message);
+            console.error('Auth Error (JWT):', error.message);
             res.status(401);
             throw new Error('Not authorized, token failed');
         }
+
+        // ── 2. Load user & check account status (outside catch so status codes ──
+        //       for suspended/pending accounts are never overwritten)
+        req.user = await User.findById(decoded.id).select('-password');
+
+        if (!req.user) {
+            res.status(401);
+            throw new Error('User not found');
+        }
+
+        if (req.user.status === 'suspended') {
+            res.status(401);
+            throw new Error('Not authorized, account has been suspended by the master admin');
+        }
+
+        if (req.user.status === 'pending') {
+            res.status(403);
+            throw new Error('Not authorized, account is pending approval');
+        }
+
+        return next();
     }
 
     if (!token) {

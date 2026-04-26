@@ -149,7 +149,7 @@ export const useMasterAdminData = () => {
             queryClient.invalidateQueries(['adminUsers']);
             queryClient.invalidateQueries(['adminStats']);
             queryClient.invalidateQueries(['adminAuditLogs']);
-            toast.success(data.message);
+            toast.success(data.status === 'active' ? 'User reactivated successfully' : 'User suspended successfully');
         },
         onError: (err) => toast.error('Failed to toggle suspension')
     });
