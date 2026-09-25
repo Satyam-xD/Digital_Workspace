@@ -47,6 +47,7 @@ In the era of remote and hybrid work, switching between multiple apps for video 
 
 ## 🛠️ Technology Stack
 
+*   **Backend**: Go (`net/http`, Go 1.22+ routing, MongoDB official Go driver, Socket.IO v4)
 *   **Frontend**: React.js, Vite
 *   **Styling**: Tailwind CSS (with custom "Aurora" theme)
 *   **Icons**: Lucide React
@@ -61,24 +62,24 @@ To run the application locally:
 1.  **Clone the repository**:
     ```bash
     git clone https://github.com/Satyam-xD/Aurora-Workspace.git
+    cd Aurora-Workspace
     ```
 
-2.  **Navigate to the frontend directory**:
+2.  **Start the Go Backend**:
     ```bash
-    cd Aurora-Workspace/frontend
+    cd backend
+    go run main.go
+    # or npm run dev
     ```
 
-3.  **Install dependencies**:
+3.  **Start the Frontend**:
     ```bash
+    cd ../frontend
     npm install
-    ```
-
-4.  **Start the development server**:
-    ```bash
     npm run dev
     ```
 
-5.  **Open your browser**:
+4.  **Open your browser**:
     Visit `http://localhost:5173` to see the app in action.
 
 ## 🎨 Design System

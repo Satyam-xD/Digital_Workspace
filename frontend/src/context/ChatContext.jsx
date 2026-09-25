@@ -10,7 +10,7 @@ const ChatContext = createContext();
 
 const SOCKET_URL = import.meta.env.PROD 
     ? 'https://digital-workspace.onrender.com' 
-    : 'http://localhost:4000';
+    : (import.meta.env.VITE_BACKEND_URL || 'http://localhost:4001');
 
 
 export const ChatProvider = ({ children }) => {

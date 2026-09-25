@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
   // Load environment variables from the backend directory
   const backendEnv = loadEnv(mode, path.resolve(__dirname, '../backend'), '')
   const env = loadEnv(mode, process.cwd(), '')
-  const targetPort = backendEnv.PORT || 4000;
+  const targetPort = backendEnv.PORT || 4001;
   const target = `http://localhost:${targetPort}`;
 
   return {
